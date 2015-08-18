@@ -6,6 +6,8 @@ from ..exceptions import ElasticsearchException, TransportError
 from ..compat import map
 
 logger = logging.getLogger('elasticsearch.helpers')
+apollo_doc_counter = 0
+apollo_ids = []
 
 class BulkIndexError(ElasticsearchException):
     @property
@@ -299,11 +301,41 @@ def reindex(client, source_index, target_index, query=None, target_client=None,
         fields=('_source', '_parent', '_routing', '_timestamp'),
         **scan_kwargs
     )
+
+    def update_source(h):
+	global apollo_doc_counter
+	global apollo_ids
+	apollo_doc_counter = apollo_doc_counter + 1
+	apollo_batch_num = (apollo_doc_counter / chunk_size) + 1
+	apollo_ids.append(h['_id'])
+	if len(apollo_ids) == chunk_size:
+		print "processed (batch - ", apollo_batch_num,") : "
+		apollo_ids = []
+    	source = h['_source']
+	if 'id' in source:
+        	source['id'] = str(h['_source']['id'])
+	if 'group_id' in source:
+		source['group_id'] = str(h['_source']['group_id'])
+	if 'order_item_id' in source:
+		source['order_item_id'] = str(h['_source']['order_item_id'])
+	arr_fids = []
+	if 'freebie_item_ids' in source:
+		freebie_item_ids = h['_source']['freebie_item_ids']
+		if isinstance(freebie_item_ids, list):
+			for x in freebie_item_ids:
+				arr_fids.append(str(x))
+		else:
+			arr_fids.append(str(freebie_item_ids))
+		source['freebie_item_ids'] = arr_fids
+	h['_source'] = source
+	return h
+
     def _change_doc_index(hits, index):
         for h in hits:
             h['_index'] = index
             if 'fields' in h:
                 h.update(h.pop('fields'))
+            h = update_source(h)
             yield h
 
     kwargs = {
